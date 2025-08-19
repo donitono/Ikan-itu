@@ -29,6 +29,14 @@
 - **Server Sync**: Synchronizes settings across game sessions
 - **Teleport Integration**: Auto-teleports to NPC sellers
 
+### ✨ **Enchant System** *(NEW!)*
+- **14 Enchant Types**: XPerienced, Leprechaun, Gold Digger, Mutation Hunter, dan lainnya
+- **Smart Selection**: Multi-select target enchants dengan descriptions
+- **Auto Rolling**: Automated enchanting dengan detection system
+- **Altar Navigation**: Auto teleport ke enchanting altar
+- **Hotbar Management**: Auto setup enchant stones
+- **Safety Features**: Distance checks, max rolls, emergency stop
+
 ### 📊 **Advanced Analytics Dashboard**
 - **Real-time Statistics**: Fish count, rare catches, session time
 - **Location Heatmap**: Efficiency tracking for different fishing spots
@@ -69,6 +77,7 @@
 ModernAutoFish/
 ├── main.lua                    # Original monolithic version
 ├── main_modular.lua           # New modular entry point
+├── main_modular_ui_preserved.lua # UI Preserved version with Enchant System
 ├── modules/
 │   ├── core/
 │   │   ├── config.lua         # Configuration and constants
@@ -79,6 +88,7 @@ ModernAutoFish/
 │   │   ├── teleportTab.lua    # Teleport tab module
 │   │   ├── playerTab.lua      # Player tab module
 │   │   ├── featureTab.lua     # Feature tab module
+│   │   ├── enchantTab.lua     # Enchant system tab module ⭐NEW
 │   │   └── dashboardTab.lua   # Dashboard tab module
 │   └── features/
 │       ├── autoSell.lua       # Auto sell system
@@ -95,19 +105,26 @@ ModernAutoFish/
 ## 🚀 Installation
 
 ### Method 1: Load from GitHub (Recommended)
+
+**Standard Version:**
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/yourusername/ModernAutoFish/main/main_modular.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/donitono/Ikan-itu/main/main_modular.lua"))()
+```
+
+**Enhanced Version with Enchant System:** ⭐NEW
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/donitono/Ikan-itu/main/main_modular_ui_preserved.lua"))()
 ```
 
 ### Method 2: Manual Installation
-1. Copy the content of `main_modular.lua`
+1. Copy the content of your preferred version from above
 2. Paste into your Roblox executor
 3. Execute the script
 
 ### Method 3: Development Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/ModernAutoFish.git
+   git clone https://github.com/donitono/Ikan-itu.git
    ```
 2. Use the modular version for easier customization
 3. Modify individual modules as needed
@@ -334,7 +351,43 @@ Config.IslandLocations = {
 
 ---
 
-## 📄 License
+## � Changelog
+
+### v2.2.0 - Enchant System Update ⭐
+- ✨ **NEW: Complete Enchant System**
+  - 14 enchant types with descriptions
+  - Auto teleport to enchanting altar
+  - Smart hotbar management 
+  - Target enchant selection with checkboxes
+  - Auto rolling with max attempts setting
+  - Real-time status monitoring
+  - Safety features and emergency stop
+- 🎣 **Enhanced Fish Database**
+  - 150+ authentic fish names from game data
+  - Complete variant system (Galaxy, Corrupt, etc.)
+  - Improved rarity categories
+  - Special item detection (plaques, rods, enchant items)
+- 🎨 **UI Improvements**
+  - New Enchant tab in main interface
+  - Distance tracking to altar
+  - Roll progress indicators
+  - Enhanced visual feedback
+
+### v2.1.0 - UI Preserved
+- 🎨 Preserved original modern UI design
+- 🔧 Modular architecture implementation
+- 📊 Enhanced dashboard system
+- 🚀 Movement enhancements (Float/NoClip)
+
+### v2.0.0 - Major Rewrite
+- 🏗️ Complete modular architecture
+- 🤖 Smart AI fishing algorithms
+- 🎯 Advanced auto-sell system
+- 🌍 Comprehensive teleport system
+
+---
+
+## �📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
@@ -358,6 +411,6 @@ This script is for educational purposes only. Use at your own risk. The develope
 
 **Star ⭐ this repository if you found it helpful!**
 
-[Report Bug](https://github.com/yourusername/ModernAutoFish/issues) • [Request Feature](https://github.com/yourusername/ModernAutoFish/issues) • [Join Discord](https://discord.gg/your-invite)
+[Report Bug](https://github.com/donitono/Ikan-itu/issues) • [Request Feature](https://github.com/donitono/Ikan-itu/issues) • [Join Discord](https://discord.gg/your-invite)
 
 </div>
