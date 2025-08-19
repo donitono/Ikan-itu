@@ -481,6 +481,121 @@ function FishingAI.StopAutoMode()
 end
 
 -- ============================================================================
+-- DASHBOARD SYSTEM
+-- ============================================================================
+local Dashboard = {
+    fishCaught = {},
+    rareFishCaught = {},
+    locationStats = {},
+    sessionStats = {
+        startTime = tick(),
+        fishCount = 0,
+        rareCount = 0,
+        totalValue = 0,
+        currentLocation = "Unknown"
+    },
+    heatmap = {},
+    optimalTimes = {}
+}
+
+-- Fish Rarity Categories
+local FishRarity = {
+    MYTHIC = {
+        "Hawks Turtle", "Dotted Stingray", "Hammerhead Shark", "Manta Ray", 
+        "Abyss Seahorse", "Blueflame Ray", "Prismy Seahorse", "Loggerhead Turtle"
+    },
+    LEGENDARY = {
+        "Blue Lobster", "Greenbee Grouper", "Starjam Tang", "Yellowfin Tuna",
+        "Chrome Tuna", "Magic Tang", "Enchanted Angelfish", "Lavafin Tuna", 
+        "Lobster", "Bumblebee Grouper"
+    },
+    EPIC = {
+        "Domino Damsel", "Panther Grouper", "Unicorn Tang", "Dorhey Tang",
+        "Moorish Idol", "Cow Clownfish", "Astra Damsel", "Firecoal Damsel",
+        "Longnose Butterfly", "Sushi Cardinal"
+    },
+    RARE = {
+        "Scissortail Dartfish", "White Clownfish", "Darwin Clownfish", 
+        "Korean Angelfish", "Candy Butterfly", "Jewel Tang", "Charmed Tang",
+        "Kau Cardinal", "Fire Goby"
+    },
+    UNCOMMON = {
+        "Maze Angelfish", "Tricolore Butterfly", "Flame Angelfish", 
+        "Yello Damselfish", "Vintage Damsel", "Coal Tang", "Magma Goby",
+        "Banded Butterfly", "Shrimp Goby"
+    },
+    COMMON = {
+        "Orangy Goby", "Specked Butterfly", "Corazon Damse", "Copperband Butterfly",
+        "Strawberry Dotty", "Azure Damsel", "Clownfish", "Skunk Tilefish",
+        "Yellowstate Angelfish", "Vintage Blue Tang", "Ash Basslet", 
+        "Volcanic Basslet", "Boa Angelfish", "Jennifer Dottyback", "Reef Chromis"
+    }
+}
+
+local function GetFishRarity(fishName)
+    for rarity, fishList in pairs(FishRarity) do
+        for _, fish in pairs(fishList) do
+            if string.find(string.lower(fishName), string.lower(fish)) then
+                return rarity
+            end
+        end
+    end
+    return "COMMON"
+end
+
+function Dashboard.LogFishCatch(fishName, location)
+    local currentTime = tick()
+    local rarity = GetFishRarity(fishName)
+    
+    -- Log to main fish database
+    table.insert(Dashboard.fishCaught, {
+        name = fishName,
+        rarity = rarity,
+        location = location or Dashboard.sessionStats.currentLocation,
+        timestamp = currentTime,
+        hour = tonumber(os.date("%H", currentTime))
+    })
+    
+    -- Log rare fish separately
+    if rarity ~= "COMMON" then
+        table.insert(Dashboard.rareFishCaught, {
+            name = fishName,
+            rarity = rarity,
+            location = location or Dashboard.sessionStats.currentLocation,
+            timestamp = currentTime
+        })
+        Dashboard.sessionStats.rareCount = Dashboard.sessionStats.rareCount + 1
+    end
+    
+    -- Update session stats
+    Dashboard.sessionStats.fishCount = Dashboard.sessionStats.fishCount + 1
+    
+    -- Update location stats
+    local loc = location or Dashboard.sessionStats.currentLocation
+    if not Dashboard.locationStats[loc] then
+        Dashboard.locationStats[loc] = {count = 0, rareCount = 0, value = 0}
+    end
+    Dashboard.locationStats[loc].count = Dashboard.locationStats[loc].count + 1
+    if rarity ~= "COMMON" then
+        Dashboard.locationStats[loc].rareCount = Dashboard.locationStats[loc].rareCount + 1
+    end
+end
+
+function Dashboard.GetSessionSummary()
+    local sessionTime = tick() - Dashboard.sessionStats.startTime
+    local hours = math.floor(sessionTime / 3600)
+    local minutes = math.floor((sessionTime % 3600) / 60)
+    local seconds = math.floor(sessionTime % 60)
+    
+    return {
+        fishCount = Dashboard.sessionStats.fishCount,
+        rareCount = Dashboard.sessionStats.rareCount,
+        totalValue = Dashboard.sessionStats.totalValue,
+        sessionTime = string.format("%02d:%02d:%02d", hours, minutes, seconds),
+        currentLocation = Dashboard.sessionStats.currentLocation
+    }
+end
+-- ============================================================================
 -- TELEPORT MODULE
 -- ============================================================================
 local Teleport = {}
@@ -495,12 +610,17 @@ function Teleport.To(position)
 end
 
 -- ============================================================================
--- MOVEMENT MODULE
+-- MOVEMENT ENHANCEMENT MODULE
 -- ============================================================================
 local Movement = {
     floatEnabled = false,
     speed = 16,
-    jumpPower = 50
+    jumpPower = 50,
+    noClipEnabled = false,
+    floatHeight = 16,
+    floatConnection = nil,
+    noClipConnections = {},
+    originalProperties = {}
 }
 
 function Movement.SetSpeed(value)
@@ -515,6 +635,134 @@ function Movement.SetJump(value)
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
         LocalPlayer.Character.Humanoid.JumpPower = value
     end
+end
+
+function Movement.EnableFloat()
+    if Movement.floatEnabled then return end
+    
+    local character = LocalPlayer.Character
+    if not character then 
+        Utils.Notify("Movement", "❌ Character not found!")
+        return 
+    end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoid or not rootPart then
+        Utils.Notify("Movement", "❌ Character components missing!")
+        return
+    end
+    
+    Movement.floatEnabled = true
+    
+    -- Store original properties
+    Movement.originalProperties.PlatformStand = humanoid.PlatformStand
+    Movement.originalProperties.WalkSpeed = humanoid.WalkSpeed
+    
+    -- Create BodyVelocity for floating
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(4000, 4000, 4000)
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity.Parent = rootPart
+    
+    -- Create BodyPosition for height control
+    local bodyPosition = Instance.new("BodyPosition")
+    bodyPosition.MaxForce = Vector3.new(0, math.huge, 0)
+    bodyPosition.Position = rootPart.Position + Vector3.new(0, Movement.floatHeight, 0)
+    bodyPosition.Parent = rootPart
+    
+    Movement.floatConnection = RunService.Heartbeat:Connect(function()
+        if Movement.floatEnabled and rootPart and rootPart.Parent then
+            bodyPosition.Position = rootPart.Position + Vector3.new(0, Movement.floatHeight, 0)
+        end
+    end)
+    
+    Utils.Notify("🚀 Float", "Float mode enabled!")
+end
+
+function Movement.DisableFloat()
+    Movement.floatEnabled = false
+    
+    local character = LocalPlayer.Character
+    if character then
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            -- Remove float objects
+            for _, obj in pairs(rootPart:GetChildren()) do
+                if obj:IsA("BodyVelocity") or obj:IsA("BodyPosition") then
+                    obj:Destroy()
+                end
+            end
+        end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid and Movement.originalProperties.PlatformStand ~= nil then
+            humanoid.PlatformStand = Movement.originalProperties.PlatformStand
+        end
+    end
+    
+    if Movement.floatConnection then
+        Movement.floatConnection:Disconnect()
+        Movement.floatConnection = nil
+    end
+    
+    Utils.Notify("🚀 Float", "Float mode disabled!")
+end
+
+function Movement.EnableNoClip()
+    if Movement.noClipEnabled then return end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    Movement.noClipEnabled = true
+    
+    local function noClipPart(part)
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            local connection = RunService.Stepped:Connect(function()
+                if Movement.noClipEnabled then
+                    part.CanCollide = false
+                end
+            end)
+            table.insert(Movement.noClipConnections, connection)
+        end
+    end
+    
+    for _, part in pairs(character:GetDescendants()) do
+        noClipPart(part)
+    end
+    
+    local connection = character.DescendantAdded:Connect(function(part)
+        if Movement.noClipEnabled then
+            noClipPart(part)
+        end
+    end)
+    table.insert(Movement.noClipConnections, connection)
+    
+    Utils.Notify("👻 NoClip", "NoClip enabled!")
+end
+
+function Movement.DisableNoClip()
+    Movement.noClipEnabled = false
+    
+    -- Disconnect all connections
+    for _, connection in pairs(Movement.noClipConnections) do
+        connection:Disconnect()
+    end
+    Movement.noClipConnections = {}
+    
+    -- Restore collision
+    local character = LocalPlayer.Character
+    if character then
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                part.CanCollide = true
+            end
+        end
+    end
+    
+    Utils.Notify("👻 NoClip", "NoClip disabled!")
 end
 
 -- ============================================================================
@@ -1064,14 +1312,90 @@ local function BuildUI()
     jumpLabel.BackgroundTransparency = 1
     jumpLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-    featureScroll.CanvasSize = UDim2.new(0, 0, 0, 185)
+    -- Float Section
+    local floatSection = Instance.new("Frame", featureScroll)
+    floatSection.Size = UDim2.new(1, -10, 0, 80)
+    floatSection.Position = UDim2.new(0, 5, 0, 185)
+    floatSection.BackgroundColor3 = Config.Colors.SectionBG
+    floatSection.BorderSizePixel = 0
+    Instance.new("UICorner", floatSection)
+
+    local floatLabel = Instance.new("TextLabel", floatSection)
+    floatLabel.Size = UDim2.new(1, -20, 0, 25)
+    floatLabel.Position = UDim2.new(0, 10, 0, 5)
+    floatLabel.Text = "🚀 Float Mode"
+    floatLabel.Font = Enum.Font.GothamBold
+    floatLabel.TextSize = 14
+    floatLabel.TextColor3 = Config.Colors.Accent
+    floatLabel.BackgroundTransparency = 1
+    floatLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local floatEnableBtn = Instance.new("TextButton", floatSection)
+    floatEnableBtn.Size = UDim2.new(0.48, -5, 0, 35)
+    floatEnableBtn.Position = UDim2.new(0, 10, 0, 35)
+    floatEnableBtn.Text = "🚀 Enable Float"
+    floatEnableBtn.Font = Enum.Font.GothamBold
+    floatEnableBtn.TextSize = 12
+    floatEnableBtn.BackgroundColor3 = Config.Colors.Accent
+    floatEnableBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", floatEnableBtn)
+
+    local floatDisableBtn = Instance.new("TextButton", floatSection)
+    floatDisableBtn.Size = UDim2.new(0.48, -5, 0, 35)
+    floatDisableBtn.Position = UDim2.new(0.52, 5, 0, 35)
+    floatDisableBtn.Text = "🛑 Disable Float"
+    floatDisableBtn.Font = Enum.Font.GothamBold
+    floatDisableBtn.TextSize = 12
+    floatDisableBtn.BackgroundColor3 = Config.Colors.Error
+    floatDisableBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", floatDisableBtn)
+
+    -- NoClip Section  
+    local noClipSection = Instance.new("Frame", featureScroll)
+    noClipSection.Size = UDim2.new(1, -10, 0, 80)
+    noClipSection.Position = UDim2.new(0, 5, 0, 275)
+    noClipSection.BackgroundColor3 = Config.Colors.SectionBG
+    noClipSection.BorderSizePixel = 0
+    Instance.new("UICorner", noClipSection)
+
+    local noClipLabel = Instance.new("TextLabel", noClipSection)
+    noClipLabel.Size = UDim2.new(1, -20, 0, 25)
+    noClipLabel.Position = UDim2.new(0, 10, 0, 5)
+    noClipLabel.Text = "👻 NoClip Mode"
+    noClipLabel.Font = Enum.Font.GothamBold
+    noClipLabel.TextSize = 14
+    noClipLabel.TextColor3 = Color3.fromRGB(200,100,255)
+    noClipLabel.BackgroundTransparency = 1
+    noClipLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local noClipEnableBtn = Instance.new("TextButton", noClipSection)
+    noClipEnableBtn.Size = UDim2.new(0.48, -5, 0, 35)
+    noClipEnableBtn.Position = UDim2.new(0, 10, 0, 35)
+    noClipEnableBtn.Text = "👻 Enable NoClip"
+    noClipEnableBtn.Font = Enum.Font.GothamBold
+    noClipEnableBtn.TextSize = 12
+    noClipEnableBtn.BackgroundColor3 = Color3.fromRGB(200,100,255)
+    noClipEnableBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", noClipEnableBtn)
+
+    local noClipDisableBtn = Instance.new("TextButton", noClipSection)
+    noClipDisableBtn.Size = UDim2.new(0.48, -5, 0, 35)
+    noClipDisableBtn.Position = UDim2.new(0.52, 5, 0, 35)
+    noClipDisableBtn.Text = "🛑 Disable NoClip"
+    noClipDisableBtn.Font = Enum.Font.GothamBold
+    noClipDisableBtn.TextSize = 12
+    noClipDisableBtn.BackgroundColor3 = Config.Colors.Error
+    noClipDisableBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", noClipDisableBtn)
+
+    featureScroll.CanvasSize = UDim2.new(0, 0, 0, 365)
 
     -- Tab 5: Dashboard
     local dashboardFrame, dashboardScroll = createTabFrame()
 
     -- Session Stats
     local sessionSection = Instance.new("Frame", dashboardScroll)
-    sessionSection.Size = UDim2.new(1, -10, 0, 120)
+    sessionSection.Size = UDim2.new(1, -10, 0, 160)
     sessionSection.Position = UDim2.new(0, 5, 0, 5)
     sessionSection.BackgroundColor3 = Config.Colors.SectionBG
     sessionSection.BorderSizePixel = 0
@@ -1097,9 +1421,19 @@ local function BuildUI()
     fishCountLabel.BackgroundTransparency = 1
     fishCountLabel.TextXAlignment = Enum.TextXAlignment.Left
 
+    local rareCountLabel = Instance.new("TextLabel", sessionSection)
+    rareCountLabel.Size = UDim2.new(1, -20, 0, 20)
+    rareCountLabel.Position = UDim2.new(0, 10, 0, 60)
+    rareCountLabel.Text = "⭐ Rare Fish: 0"
+    rareCountLabel.Font = Enum.Font.GothamSemibold
+    rareCountLabel.TextSize = 12
+    rareCountLabel.TextColor3 = Config.Colors.Warning
+    rareCountLabel.BackgroundTransparency = 1
+    rareCountLabel.TextXAlignment = Enum.TextXAlignment.Left
+
     local timeLabel = Instance.new("TextLabel", sessionSection)
     timeLabel.Size = UDim2.new(1, -20, 0, 20)
-    timeLabel.Position = UDim2.new(0, 10, 0, 60)
+    timeLabel.Position = UDim2.new(0, 10, 0, 85)
     timeLabel.Text = "⏱️ Session Time: 00:00:00"
     timeLabel.Font = Enum.Font.GothamSemibold
     timeLabel.TextSize = 12
@@ -1109,15 +1443,73 @@ local function BuildUI()
 
     local valueLabel = Instance.new("TextLabel", sessionSection)
     valueLabel.Size = UDim2.new(1, -20, 0, 20)
-    valueLabel.Position = UDim2.new(0, 10, 0, 85)
+    valueLabel.Position = UDim2.new(0, 10, 0, 110)
     valueLabel.Text = "💰 Session Value: 0¢"
     valueLabel.Font = Enum.Font.GothamSemibold
     valueLabel.TextSize = 12
-    valueLabel.TextColor3 = Config.Colors.Primary
+    valueLabel.TextColor3 = Config.Colors.Success
     valueLabel.BackgroundTransparency = 1
     valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-    dashboardScroll.CanvasSize = UDim2.new(0, 0, 0, 135)
+    local locationLabel = Instance.new("TextLabel", sessionSection)
+    locationLabel.Size = UDim2.new(1, -20, 0, 20)
+    locationLabel.Position = UDim2.new(0, 10, 0, 135)
+    locationLabel.Text = "🌍 Location: Unknown"
+    locationLabel.Font = Enum.Font.GothamSemibold
+    locationLabel.TextSize = 12
+    locationLabel.TextColor3 = Config.Colors.Accent
+    locationLabel.BackgroundTransparency = 1
+    locationLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Recent Catches Section
+    local recentSection = Instance.new("Frame", dashboardScroll)
+    recentSection.Size = UDim2.new(1, -10, 0, 120)
+    recentSection.Position = UDim2.new(0, 5, 0, 175)
+    recentSection.BackgroundColor3 = Config.Colors.SectionBG
+    recentSection.BorderSizePixel = 0
+    Instance.new("UICorner", recentSection)
+
+    local recentTitle = Instance.new("TextLabel", recentSection)
+    recentTitle.Size = UDim2.new(1, -20, 0, 25)
+    recentTitle.Position = UDim2.new(0, 10, 0, 5)
+    recentTitle.Text = "🐟 Recent Catches"
+    recentTitle.Font = Enum.Font.GothamBold
+    recentTitle.TextSize = 14
+    recentTitle.TextColor3 = Config.Colors.Success
+    recentTitle.BackgroundTransparency = 1
+    recentTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+    local recentFish1 = Instance.new("TextLabel", recentSection)
+    recentFish1.Size = UDim2.new(1, -20, 0, 18)
+    recentFish1.Position = UDim2.new(0, 10, 0, 35)
+    recentFish1.Text = "🎣 No recent catches"
+    recentFish1.Font = Enum.Font.Gotham
+    recentFish1.TextSize = 11
+    recentFish1.TextColor3 = Config.Colors.Secondary
+    recentFish1.BackgroundTransparency = 1
+    recentFish1.TextXAlignment = Enum.TextXAlignment.Left
+
+    local recentFish2 = Instance.new("TextLabel", recentSection)
+    recentFish2.Size = UDim2.new(1, -20, 0, 18)
+    recentFish2.Position = UDim2.new(0, 10, 0, 55)
+    recentFish2.Text = ""
+    recentFish2.Font = Enum.Font.Gotham
+    recentFish2.TextSize = 11
+    recentFish2.TextColor3 = Config.Colors.Secondary
+    recentFish2.BackgroundTransparency = 1
+    recentFish2.TextXAlignment = Enum.TextXAlignment.Left
+
+    local recentFish3 = Instance.new("TextLabel", recentSection)
+    recentFish3.Size = UDim2.new(1, -20, 0, 18)
+    recentFish3.Position = UDim2.new(0, 10, 0, 75)
+    recentFish3.Text = ""
+    recentFish3.Font = Enum.Font.Gotham
+    recentFish3.TextSize = 11
+    recentFish3.TextColor3 = Config.Colors.Secondary
+    recentFish3.BackgroundTransparency = 1
+    recentFish3.TextXAlignment = Enum.TextXAlignment.Left
+
+    dashboardScroll.CanvasSize = UDim2.new(0, 0, 0, 305)
 
     -- Tab switching logic
     local tabs = {
@@ -1190,17 +1582,48 @@ local function BuildUI()
         autoModeStatus.TextColor3 = Config.Colors.Warning
     end)
 
+    -- Features callbacks
+    floatEnableBtn.MouseButton1Click:Connect(function()
+        Movement.EnableFloat()
+    end)
+
+    floatDisableBtn.MouseButton1Click:Connect(function()
+        Movement.DisableFloat()
+    end)
+
+    noClipEnableBtn.MouseButton1Click:Connect(function()
+        Movement.EnableNoClip()
+    end)
+
+    noClipDisableBtn.MouseButton1Click:Connect(function()
+        Movement.DisableNoClip()
+    end)
+
     -- Update dashboard periodically
     task.spawn(function()
         while screenGui.Parent do
-            local sessionTime = tick() - FishingAI.statistics.startTime
-            local hours = math.floor(sessionTime / 3600)
-            local minutes = math.floor((sessionTime % 3600) / 60)
-            local seconds = math.floor(sessionTime % 60)
+            local summary = Dashboard.GetSessionSummary()
             
             fishCountLabel.Text = "🎣 Fish Caught: " .. FishingAI.statistics.fishCaught
-            timeLabel.Text = string.format("⏱️ Session Time: %02d:%02d:%02d", hours, minutes, seconds)
-            valueLabel.Text = "💰 Session Value: " .. FishingAI.statistics.sessionValue .. "¢"
+            rareCountLabel.Text = "⭐ Rare Fish: " .. summary.rareCount
+            timeLabel.Text = "⏱️ Session Time: " .. summary.sessionTime
+            valueLabel.Text = "💰 Session Value: " .. summary.totalValue .. "¢"
+            locationLabel.Text = "🌍 Location: " .. summary.currentLocation
+            
+            -- Update recent catches (show last 3)
+            local recentCatches = {}
+            for i = math.max(1, #Dashboard.fishCaught - 2), #Dashboard.fishCaught do
+                if Dashboard.fishCaught[i] then
+                    local fish = Dashboard.fishCaught[i]
+                    local rarity = fish.rarity or "COMMON"
+                    local emoji = rarity == "MYTHIC" and "🔥" or rarity == "LEGENDARY" and "⭐" or rarity == "EPIC" and "💎" or rarity == "RARE" and "🌟" or "🐟"
+                    table.insert(recentCatches, emoji .. " " .. fish.name)
+                end
+            end
+            
+            recentFish1.Text = recentCatches[3] or "🎣 No recent catches"
+            recentFish2.Text = recentCatches[2] or ""
+            recentFish3.Text = recentCatches[1] or ""
             
             task.wait(1)
         end
