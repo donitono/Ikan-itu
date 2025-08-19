@@ -1,12 +1,32 @@
--- modern_autofish.lua
--- Cleaned modern UI + Dual-mode AutoFishing (smart & secure)
--- Added new feature: Auto Mode by Spinner_xxx
+--[[
+🎣 FISH-IT - Advanced Fishing Bot for Roblox
+Modern modular architecture with Smart Enchant system
 
+Features:
+- Smart & Secure AutoFishing modes
+- Smart Enchant target system with auto-stop functionality  
+- Movement enhancements (Float, NoClip, Auto Spinner)
+- Dashboard & Statistics tracking
+- Auto Sell system with server sync
+- Network monitoring & auto reconnect
+- Anti-AFK system
+
+Author: donitono
+Repository: https://github.com/donitono/Ikan-itu
+Version: 2.1.0
+--]]
+
+-- 🎯 CORE SERVICES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
+
+-- 🔧 LOAD MODULES  
+local Config = require(script.Parent.modules.config)
+local EnchantSystem = require(script.Parent.modules.features.enchantSystem)
+local EnchantUI = require(script.Parent.modules.ui.enchantTab)
 
 -- Must run on client
 if not RunService:IsClient() then
@@ -3171,10 +3191,20 @@ local function BuildUI()
     reconnectManualBtn.TextColor3 = Color3.fromRGB(255,255,255)
     Instance.new("UICorner", reconnectManualBtn)
 
-    -- Enhancement Section
+    -- 🎯 SMART ENCHANT SECTION (Using Modular System)
+    local smartEnchantSection = EnchantUI.CreateSmartEnchantSection(featureScrollFrame)
+
+    -- Create recommendation section above Smart Enchant
+    local goalSection = EnchantUI.CreateEnchantRecommendationSection(featureScrollFrame)
+    
+    -- Adjust positions
+    goalSection.Position = UDim2.new(0, 5, 0, 415)
+    smartEnchantSection.Position = UDim2.new(0, 5, 0, 525)
+
+    -- Legacy Enhancement Section (Simplified)
     local enhancementSection = Instance.new("Frame", featureScrollFrame)
-    enhancementSection.Size = UDim2.new(1, -10, 0, 150)
-    enhancementSection.Position = UDim2.new(0, 5, 0, 415) -- Moved down to accommodate reconnect section
+    enhancementSection.Size = UDim2.new(1, -10, 0, 120)
+    enhancementSection.Position = UDim2.new(0, 5, 0, 925) -- Moved below Smart Enchant
     enhancementSection.BackgroundColor3 = Color3.fromRGB(45,45,52)
     enhancementSection.BorderSizePixel = 0
     Instance.new("UICorner", enhancementSection)
@@ -3182,10 +3212,10 @@ local function BuildUI()
     local enhancementTitle = Instance.new("TextLabel", enhancementSection)
     enhancementTitle.Size = UDim2.new(1, -20, 0, 20)
     enhancementTitle.Position = UDim2.new(0, 10, 0, 5)
-    enhancementTitle.Text = "🔮 Auto Enhancement System"
+    enhancementTitle.Text = "🔮 Legacy Enhancement System"
     enhancementTitle.Font = Enum.Font.GothamBold
     enhancementTitle.TextSize = 14
-    enhancementTitle.TextColor3 = Color3.fromRGB(255,140,255)
+    enhancementTitle.TextColor3 = Color3.fromRGB(150,150,150)
     enhancementTitle.BackgroundTransparency = 1
     enhancementTitle.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -3201,7 +3231,7 @@ local function BuildUI()
     teleportLabel.Text = "📍 Teleport to Altar"
     teleportLabel.Font = Enum.Font.GothamSemibold
     teleportLabel.TextSize = 12
-    teleportLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    teleportLabel.TextColor3 = Color3.fromRGB(200,200,200)
     teleportLabel.BackgroundTransparency = 1
     teleportLabel.TextXAlignment = Enum.TextXAlignment.Left
     teleportLabel.TextYAlignment = Enum.TextYAlignment.Center
@@ -3216,85 +3246,22 @@ local function BuildUI()
     teleportBtn.TextColor3 = Color3.fromRGB(255,255,255)
     Instance.new("UICorner", teleportBtn)
 
-    -- Auto Activate Altar Toggle
-    local autoAltarToggle = Instance.new("Frame", enhancementSection)
-    autoAltarToggle.Size = UDim2.new(1, -20, 0, 25)
-    autoAltarToggle.Position = UDim2.new(0, 10, 0, 60)
-    autoAltarToggle.BackgroundTransparency = 1
-
-    local altarLabel = Instance.new("TextLabel", autoAltarToggle)
-    altarLabel.Size = UDim2.new(0.7, -10, 1, 0)
-    altarLabel.Position = UDim2.new(0, 0, 0, 0)
-    altarLabel.Text = "🏛️ Auto Activate Altar"
-    altarLabel.Font = Enum.Font.GothamSemibold
-    altarLabel.TextSize = 12
-    altarLabel.TextColor3 = Color3.fromRGB(255,255,255)
-    altarLabel.BackgroundTransparency = 1
-    altarLabel.TextXAlignment = Enum.TextXAlignment.Left
-    altarLabel.TextYAlignment = Enum.TextYAlignment.Center
-
-    local altarToggleBtn = Instance.new("TextButton", autoAltarToggle)
-    altarToggleBtn.Size = UDim2.new(0, 50, 0, 20)
-    altarToggleBtn.Position = UDim2.new(1, -55, 0, 2)
-    altarToggleBtn.Text = "OFF"
-    altarToggleBtn.Font = Enum.Font.GothamBold
-    altarToggleBtn.TextSize = 10
-    altarToggleBtn.BackgroundColor3 = Color3.fromRGB(160,60,60)
-    altarToggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    Instance.new("UICorner", altarToggleBtn)
-
-    -- Auto Roll Enchant Toggle
-    local autoRollToggle = Instance.new("Frame", enhancementSection)
-    autoRollToggle.Size = UDim2.new(1, -20, 0, 25)
-    autoRollToggle.Position = UDim2.new(0, 10, 0, 90)
-    autoRollToggle.BackgroundTransparency = 1
-
-    local rollLabel = Instance.new("TextLabel", autoRollToggle)
-    rollLabel.Size = UDim2.new(0.7, -10, 1, 0)
-    rollLabel.Position = UDim2.new(0, 0, 0, 0)
-    rollLabel.Text = "🎲 Auto Roll Enchant"
-    rollLabel.Font = Enum.Font.GothamSemibold
-    rollLabel.TextSize = 12
-    rollLabel.TextColor3 = Color3.fromRGB(255,255,255)
-    rollLabel.BackgroundTransparency = 1
-    rollLabel.TextXAlignment = Enum.TextXAlignment.Left
-    rollLabel.TextYAlignment = Enum.TextYAlignment.Center
-
-    local rollToggleBtn = Instance.new("TextButton", autoRollToggle)
-    rollToggleBtn.Size = UDim2.new(0, 50, 0, 20)
-    rollToggleBtn.Position = UDim2.new(1, -55, 0, 2)
-    rollToggleBtn.Text = "OFF"
-    rollToggleBtn.Font = Enum.Font.GothamBold
-    rollToggleBtn.TextSize = 10
-    rollToggleBtn.BackgroundColor3 = Color3.fromRGB(160,60,60)
-    rollToggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    Instance.new("UICorner", rollToggleBtn)
-
-    -- Enhancement Start/Stop Buttons
-    local enhancementStartBtn = Instance.new("TextButton", enhancementSection)
-    enhancementStartBtn.Size = UDim2.new(0.48, -5, 0, 25)
-    enhancementStartBtn.Position = UDim2.new(0, 10, 0, 120)
-    enhancementStartBtn.Text = "🔮 Start Enhancement"
-    enhancementStartBtn.Font = Enum.Font.GothamBold
-    enhancementStartBtn.TextSize = 11
-    enhancementStartBtn.BackgroundColor3 = Color3.fromRGB(140,60,255)
-    enhancementStartBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    Instance.new("UICorner", enhancementStartBtn)
-
-    local enhancementStopBtn = Instance.new("TextButton", enhancementSection)
-    enhancementStopBtn.Size = UDim2.new(0.48, -5, 0, 25)
-    enhancementStopBtn.Position = UDim2.new(0.52, 5, 0, 120)
-    enhancementStopBtn.Text = "🛑 Stop Enhancement"
-    enhancementStopBtn.Font = Enum.Font.GothamBold
-    enhancementStopBtn.TextSize = 11
-    enhancementStopBtn.BackgroundColor3 = Color3.fromRGB(190,60,60)
-    enhancementStopBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    Instance.new("UICorner", enhancementStopBtn)
+    -- Legacy note
+    local legacyNote = Instance.new("TextLabel", enhancementSection)
+    legacyNote.Size = UDim2.new(1, -20, 0, 40)
+    legacyNote.Position = UDim2.new(0, 10, 0, 65)
+    legacyNote.Text = "⚠️ Use Smart Enchant above for target-based rolling with auto-stop"
+    legacyNote.Font = Enum.Font.Gotham
+    legacyNote.TextSize = 10
+    legacyNote.TextColor3 = Color3.fromRGB(255,200,100)
+    legacyNote.BackgroundTransparency = 1
+    legacyNote.TextXAlignment = Enum.TextXAlignment.Left
+    legacyNote.TextWrapped = true
 
     -- Movement Enhancement Section
     local movementSection = Instance.new("Frame", featureScrollFrame)
     movementSection.Size = UDim2.new(1, -10, 0, 240)
-    movementSection.Position = UDim2.new(0, 5, 0, 575)
+    movementSection.Position = UDim2.new(0, 5, 0, 1055) -- Adjusted position after Smart Enchant
     movementSection.BackgroundColor3 = Color3.fromRGB(45,45,52)
     movementSection.BorderSizePixel = 0
     Instance.new("UICorner", movementSection)
@@ -3535,7 +3502,7 @@ local function BuildUI()
     Instance.new("UICorner", buyAllBtn)
 
     -- Set canvas size for feature scroll frame
-    featureScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 960) -- Increased to accommodate larger movement section with Auto Spinner
+    featureScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 1320) -- Increased to accommodate Smart Enchant sections
 
     -- Feature variables
     local currentSpeed = 16
