@@ -90,6 +90,113 @@ function Utils.Notify(title, text)
     print("[modern_autofish]", title, text)
 end
 
+-- ============================================================================
+-- ROD ORIENTATION FIX SYSTEM
+-- ============================================================================
+local RodFix = {
+    enabled = true,
+    lastFixTime = 0,
+    isCharging = false,
+    chargingConnection = nil
+}
+
+local function FixRodOrientation()
+    if not RodFix.enabled then return end
+    
+    local now = tick()
+    if now - RodFix.lastFixTime < 0.05 then return end
+    RodFix.lastFixTime = now
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local equippedTool = character:FindFirstChildOfClass("Tool")
+    if not equippedTool then return end
+    
+    -- Pastikan ini fishing rod
+    local isRod = equippedTool.Name:lower():find("rod") or 
+                  equippedTool:FindFirstChild("Rod") or
+                  equippedTool:FindFirstChild("Handle")
+    if not isRod then return end
+    
+    -- Method 1: Fix Motor6D during charging phase
+    local rightArm = character:FindFirstChild("Right Arm")
+    if rightArm then
+        local rightGrip = rightArm:FindFirstChild("RightGrip")
+        if rightGrip and rightGrip:IsA("Motor6D") then
+            rightGrip.C0 = CFrame.new(0, -1, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+            rightGrip.C1 = CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, 0)
+            return
+        end
+    end
+    
+    -- Method 2: Direct tool position fix
+    local handle = equippedTool:FindFirstChild("Handle")
+    if handle and handle:IsA("BasePart") then
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            local targetCFrame = rootPart.CFrame * CFrame.new(1.5, 0, -2) * CFrame.Angles(0, math.rad(45), 0)
+            handle.CFrame = targetCFrame
+        end
+    end
+end
+
+-- ============================================================================
+-- ANIMATION MONITOR SYSTEM
+-- ============================================================================
+local AnimationMonitor = {
+    isMonitoring = false,
+    fishingSuccess = false,
+    currentState = "idle",
+    lastAnimationTime = 0,
+    animationConnection = nil
+}
+
+local function MonitorCharacterAnimations()
+    if AnimationMonitor.animationConnection then
+        AnimationMonitor.animationConnection:Disconnect()
+    end
+    
+    AnimationMonitor.animationConnection = RunService.Heartbeat:Connect(function()
+        if not AnimationMonitor.isMonitoring then return end
+        
+        local character = LocalPlayer.Character
+        if not character then return end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not humanoid then return end
+        
+        -- Monitor animation tracks
+        for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+            local animName = track.Name:lower()
+            if animName:find("fish") or animName:find("catch") or animName:find("reel") then
+                AnimationMonitor.fishingSuccess = true
+                AnimationMonitor.lastAnimationTime = tick()
+            end
+            
+            -- Monitor charging animations for rod fix
+            if animName:find("charge") or animName:find("cast") or animName:find("rod") then
+                RodFix.isCharging = true
+                FixRodOrientation()
+            end
+        end
+    end)
+end
+
+-- ============================================================================
+-- REALISTIC TIMING SYSTEM
+-- ============================================================================
+local function GetRealisticTiming(phase)
+    local timings = {
+        charging = math.random(180, 350) / 1000,      -- 0.18-0.35s
+        casting = math.random(120, 280) / 1000,       -- 0.12-0.28s  
+        waiting = math.random(1200, 2000) / 1000,     -- 1.2-2.0s
+        reeling = math.random(250, 450) / 1000,       -- 0.25-0.45s
+        completion = math.random(300, 600) / 1000     -- 0.3-0.6s
+    }
+    return timings[phase] or 0.5
+end
+
 function Utils.FindNet()
     local ok, net = pcall(function()
         local packages = ReplicatedStorage:FindFirstChild("Packages")
@@ -140,24 +247,96 @@ function FishingAI.GetRealisticTiming(phase)
     return timings[phase] or 0.5
 end
 
+function FishingAI.GetServerTime()
+    return workspace:GetServerTimeNow()
+end
+
+-- Enhanced Smart AI Cycle from original main.lua
+function FishingAI.DoSmartCycle()
+    AnimationMonitor.fishingSuccess = false
+    AnimationMonitor.currentState = "starting"
+    
+    -- Phase 1: Equip and prepare
+    FixRodOrientation() -- Fix rod orientation at start
+    if equipRemote then 
+        pcall(function() equipRemote:FireServer(1) end)
+        task.wait(GetRealisticTiming("charging"))
+    end
+    
+    -- Phase 2: Charge rod (with animation-aware timing)
+    AnimationMonitor.currentState = "charging"
+    FixRodOrientation() -- Fix during charging phase (critical!)
+    
+    local usePerfect = math.random(1,100) <= Config.safeModeChance
+    local timestamp = usePerfect and FishingAI.GetServerTime() or FishingAI.GetServerTime() + math.random()*0.5
+    
+    if rodRemote and rodRemote:IsA("RemoteFunction") then 
+        pcall(function() rodRemote:InvokeServer(timestamp) end)
+    end
+    
+    -- Fix orientation continuously during charging
+    local chargeStart = tick()
+    local chargeDuration = GetRealisticTiming("charging")
+    while tick() - chargeStart < chargeDuration do
+        FixRodOrientation() -- Keep fixing during charge animation
+        task.wait(0.02) -- Very frequent fixes during charging
+    end
+    
+    -- Phase 3: Cast (mini-game simulation)
+    AnimationMonitor.currentState = "casting"
+    FixRodOrientation() -- Fix before casting
+    
+    local x = usePerfect and -1.238 or (math.random(-1000,1000)/1000)
+    local y = usePerfect and 0.969 or (math.random(0,1000)/1000)
+    
+    if miniGameRemote and miniGameRemote:IsA("RemoteFunction") then 
+        pcall(function() miniGameRemote:InvokeServer(x,y) end)
+    end
+    
+    -- Wait for cast animation
+    task.wait(GetRealisticTiming("casting"))
+    
+    -- Phase 4: Wait for fish (realistic waiting time)
+    AnimationMonitor.currentState = "waiting"
+    task.wait(GetRealisticTiming("waiting"))
+    
+    -- Phase 5: Complete fishing
+    AnimationMonitor.currentState = "completing"
+    FixRodOrientation() -- Fix before completion
+    
+    if finishRemote then 
+        pcall(function() finishRemote:FireServer() end)
+    end
+    
+    -- Wait for completion and fish catch animations
+    task.wait(GetRealisticTiming("reeling"))
+    
+    -- Update statistics
+    FishingAI.statistics.fishCaught = FishingAI.statistics.fishCaught + 1
+    AnimationMonitor.currentState = "idle"
+end
+
 function FishingAI.DoSecureCycle()
     -- Equip rod first
     if equipRemote then 
         pcall(function() equipRemote:FireServer(1) end)
     end
     
+    -- Fix rod orientation
+    FixRodOrientation()
+    
     -- Safe mode logic
     local usePerfect = math.random(1,100) <= Config.safeModeChance
     
-    -- Charge rod
+    -- Charge rod with proper timing
     local timestamp = usePerfect and 9999999999 or (tick() + math.random())
     if rodRemote then
         pcall(function() rodRemote:InvokeServer(timestamp) end)
     end
     
-    task.wait(0.1)
+    task.wait(0.1) -- Standard charge wait
     
-    -- Minigame
+    -- Minigame with realistic coordinates
     local x = usePerfect and -1.238 or (math.random(-1000,1000)/1000)
     local y = usePerfect and 0.969 or (math.random(0,1000)/1000)
     
@@ -165,7 +344,7 @@ function FishingAI.DoSecureCycle()
         pcall(function() miniGameRemote:InvokeServer(x, y) end)
     end
     
-    task.wait(1.3)
+    task.wait(1.3) -- Wait for fishing completion
     
     -- Complete fishing
     if finishRemote then 
@@ -183,11 +362,27 @@ function FishingAI.StartSecureMode()
     FishingAI.sessionId = FishingAI.sessionId + 1
     local currentSessionId = FishingAI.sessionId
     
+    -- Start animation monitoring
+    AnimationMonitor.isMonitoring = true
+    MonitorCharacterAnimations()
+    
     Utils.Notify("🔒 Secure Mode", "Safe & reliable fishing started!")
     
     task.spawn(function()
         while FishingAI.enabled and FishingAI.sessionId == currentSessionId do
-            FishingAI.DoSecureCycle()
+            -- Fix rod orientation before each cycle
+            FixRodOrientation()
+            
+            local ok, err = pcall(function()
+                FishingAI.DoSecureCycle()
+            end)
+            
+            if not ok then
+                warn("SecureMode cycle error:", err)
+                Utils.Notify("⚠️ Secure Mode", "Cycle error, retrying...")
+                task.wait(1)
+            end
+            
             task.wait(Config.autoRecastDelay + math.random() * 0.5)
         end
     end)
@@ -196,7 +391,58 @@ end
 function FishingAI.StopFishing()
     FishingAI.enabled = false
     sessionId = sessionId + 1
+    AnimationMonitor.isMonitoring = false
+    if AnimationMonitor.animationConnection then
+        AnimationMonitor.animationConnection:Disconnect()
+    end
     Utils.Notify("🛑 Fishing Stopped", "Secure mode stopped")
+end
+
+-- Smart AI Mode
+function FishingAI.StartSmartMode()
+    if FishingAI.enabled then return end
+    
+    FishingAI.enabled = true
+    FishingAI.mode = "smart"
+    FishingAI.sessionId = FishingAI.sessionId + 1
+    local currentSessionId = FishingAI.sessionId
+    
+    -- Start animation monitoring
+    AnimationMonitor.isMonitoring = true
+    MonitorCharacterAnimations()
+    
+    Utils.Notify("🧠 Smart AI", "Advanced AI fishing started!")
+    
+    task.spawn(function()
+        while FishingAI.enabled and FishingAI.sessionId == currentSessionId do
+            -- Fix rod orientation before each cycle
+            FixRodOrientation()
+            
+            local ok, err = pcall(function()
+                FishingAI.DoSmartCycle()
+            end)
+            
+            if not ok then
+                warn("SmartMode cycle error:", err)
+                Utils.Notify("⚠️ Smart AI", "Cycle error, retrying...")
+                task.wait(1)
+            end
+            
+            -- Smart delay with variation
+            local delay = Config.autoRecastDelay + GetRealisticTiming("completion") * 0.5
+            task.wait(delay + (math.random()*0.3 - 0.15))
+        end
+    end)
+end
+
+function FishingAI.StopSmartMode()
+    FishingAI.enabled = false
+    sessionId = sessionId + 1
+    AnimationMonitor.isMonitoring = false
+    if AnimationMonitor.animationConnection then
+        AnimationMonitor.animationConnection:Disconnect()
+    end
+    Utils.Notify("🛑 Smart AI", "Advanced AI fishing stopped")
 end
 
 -- Auto Mode
@@ -595,10 +841,59 @@ local function BuildUI()
     modeStatus.TextXAlignment = Enum.TextXAlignment.Left
     modeStatus.TextWrapped = true
 
+    -- Smart AI Mode Section
+    local smartAISection = Instance.new("Frame", fishingAIScroll)
+    smartAISection.Size = UDim2.new(1, -10, 0, 120)
+    smartAISection.Position = UDim2.new(0, 5, 0, 135)
+    smartAISection.BackgroundColor3 = Config.Colors.SectionBG
+    smartAISection.BorderSizePixel = 0
+    Instance.new("UICorner", smartAISection)
+
+    local smartAILabel = Instance.new("TextLabel", smartAISection)
+    smartAILabel.Size = UDim2.new(1, -20, 0, 25)
+    smartAILabel.Position = UDim2.new(0, 10, 0, 5)
+    smartAILabel.Text = "🧠 Smart AI Mode"
+    smartAILabel.Font = Enum.Font.GothamBold
+    smartAILabel.TextSize = 14
+    smartAILabel.TextColor3 = Config.Colors.Accent
+    smartAILabel.BackgroundTransparency = 1
+    smartAILabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local smartAIStartButton = Instance.new("TextButton", smartAISection)
+    smartAIStartButton.Size = UDim2.new(0.48, -5, 0, 35)
+    smartAIStartButton.Position = UDim2.new(0, 10, 0, 35)
+    smartAIStartButton.Text = "🧠 Start Smart AI"
+    smartAIStartButton.Font = Enum.Font.GothamBold
+    smartAIStartButton.TextSize = 12
+    smartAIStartButton.BackgroundColor3 = Config.Colors.Accent
+    smartAIStartButton.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", smartAIStartButton)
+
+    local smartAIStopButton = Instance.new("TextButton", smartAISection)
+    smartAIStopButton.Size = UDim2.new(0.48, -5, 0, 35)
+    smartAIStopButton.Position = UDim2.new(0.52, 5, 0, 35)
+    smartAIStopButton.Text = "🛑 Stop Smart AI"
+    smartAIStopButton.Font = Enum.Font.GothamBold
+    smartAIStopButton.TextSize = 12
+    smartAIStopButton.BackgroundColor3 = Config.Colors.Error
+    smartAIStopButton.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", smartAIStopButton)
+
+    local smartAIStatus = Instance.new("TextLabel", smartAISection)
+    smartAIStatus.Size = UDim2.new(1, -20, 0, 35)
+    smartAIStatus.Position = UDim2.new(0, 10, 0, 80)
+    smartAIStatus.Text = "🧠 Smart AI Ready - Advanced Fishing Algorithm"
+    smartAIStatus.Font = Enum.Font.GothamSemibold
+    smartAIStatus.TextSize = 11
+    smartAIStatus.TextColor3 = Config.Colors.Accent
+    smartAIStatus.BackgroundTransparency = 1
+    smartAIStatus.TextXAlignment = Enum.TextXAlignment.Left
+    smartAIStatus.TextWrapped = true
+
     -- Auto Mode Section
     local autoModeSection = Instance.new("Frame", fishingAIScroll)
     autoModeSection.Size = UDim2.new(1, -10, 0, 120)
-    autoModeSection.Position = UDim2.new(0, 5, 0, 135)
+    autoModeSection.Position = UDim2.new(0, 5, 0, 265)
     autoModeSection.BackgroundColor3 = Config.Colors.SectionBG
     autoModeSection.BorderSizePixel = 0
     Instance.new("UICorner", autoModeSection)
@@ -644,7 +939,7 @@ local function BuildUI()
     autoModeStatus.TextXAlignment = Enum.TextXAlignment.Left
     autoModeStatus.TextWrapped = true
 
-    fishingAIScroll.CanvasSize = UDim2.new(0, 0, 0, 270)
+    fishingAIScroll.CanvasSize = UDim2.new(0, 0, 0, 400)
 
     -- Tab 2: Teleport
     local teleportFrame, teleportScroll = createTabFrame()
@@ -869,6 +1164,18 @@ local function BuildUI()
         FishingAI.StopFishing()
         modeStatus.Text = "🔒 Secure Mode Ready - Safe & Reliable Fishing"
         modeStatus.TextColor3 = Config.Colors.Success
+    end)
+
+    smartAIStartButton.MouseButton1Click:Connect(function()
+        FishingAI.StartSmartMode()
+        smartAIStatus.Text = "🧠 Smart AI Running - Advanced Algorithm Active"
+        smartAIStatus.TextColor3 = Config.Colors.Success
+    end)
+
+    smartAIStopButton.MouseButton1Click:Connect(function()
+        FishingAI.StopSmartMode()
+        smartAIStatus.Text = "🧠 Smart AI Ready - Advanced Fishing Algorithm"
+        smartAIStatus.TextColor3 = Config.Colors.Accent
     end)
 
     autoModeStartButton.MouseButton1Click:Connect(function()
