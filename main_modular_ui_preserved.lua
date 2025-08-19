@@ -1,0 +1,941 @@
+--[[
+🎣 ModernAutoFish - Modular Version (UI Preserved)
+Advanced Fishing Bot with Original Modern UI Design
+
+Repository: https://github.com/donitono/Ikan-itu
+Author: donitono
+Version: 2.1.0 (UI Preserved)
+--]]
+
+-- ============================================================================
+-- SERVICES & SETUP
+-- ============================================================================
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    warn("modern_autofish: LocalPlayer missing. Run as LocalScript while in Play mode.")
+    return
+end
+
+-- ============================================================================
+-- CORE CONFIG MODULE
+-- ============================================================================
+local Config = {
+    mode = "secure",
+    enabled = false,
+    autoModeEnabled = false,
+    safeModeChance = 70,
+    autoRecastDelay = 0.4,
+    
+    -- UI Colors (Original Theme)
+    Colors = {
+        MainBG = Color3.fromRGB(28,28,34),
+        SecondaryBG = Color3.fromRGB(35,35,42),
+        SidebarBG = Color3.fromRGB(22,22,28),
+        SectionBG = Color3.fromRGB(45,45,52),
+        ActiveTab = Color3.fromRGB(45,45,50),
+        InactiveTab = Color3.fromRGB(40,40,46),
+        Border = Color3.fromRGB(40,40,48),
+        Primary = Color3.fromRGB(235,235,235),
+        Secondary = Color3.fromRGB(200,200,200),
+        Accent = Color3.fromRGB(100,200,255),
+        Success = Color3.fromRGB(100,255,150),
+        Warning = Color3.fromRGB(255,200,100),
+        Error = Color3.fromRGB(255,100,100),
+        Blue = Color3.fromRGB(70,130,200),
+        Orange = Color3.fromRGB(255,140,0)
+    },
+    
+    -- Island Locations
+    IslandLocations = {
+        ["🏝️Moosewood"] = CFrame.new(387, 135, 270),
+        ["🏝️Roslit Bay"] = CFrame.new(-1464, 135, 699),
+        ["🏝️Snowcap Island"] = CFrame.new(2647, 139, 2336),
+        ["🏝️Mushgrove Swamp"] = CFrame.new(2497, 131, -720),
+        ["🏝️Statue Of Sovereignty"] = CFrame.new(46, 138, -1032),
+        ["🏝️Sunstone Island"] = CFrame.new(-931, 135, -1123),
+        ["🏝️Terrapin Island"] = CFrame.new(-132, 142, 2007),
+        ["🏝️The Depths - Serpent Spine"] = CFrame.new(1054, -810, -7872),
+        ["🏝️The Depths - Midnight Abyss"] = CFrame.new(1954, -713, -8861),
+        ["🏝️Forsaken Shores"] = CFrame.new(-2875, 135, 1511),
+        ["🏝️Desolate Deep"] = CFrame.new(-1770, 135, -2983),
+        ["🏝️Brine Pool"] = CFrame.new(-1749, 135, 1591),
+        ["🏝️Vertigo"] = CFrame.new(-112, 495, 1097),
+        ["🏝️Ancient Isle"] = CFrame.new(5931, 135, 503),
+        ["🏝️Archeological Site"] = CFrame.new(5708, 135, 394),
+        ["🏝️Ancient Colosseum"] = CFrame.new(5269, 135, 925),
+        ["🏠NPC Merchant"] = CFrame.new(452, 148, 227),
+        ["🎣 Rod of the Depths"] = CFrame.new(1054, 135, -3542)
+    }
+}
+
+local sessionId = 1
+local autoModeSessionId = 1
+
+-- ============================================================================
+-- UTILITY FUNCTIONS
+-- ============================================================================
+local Utils = {}
+
+function Utils.Notify(title, text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = 4})
+    end)
+    print("[modern_autofish]", title, text)
+end
+
+function Utils.FindNet()
+    local ok, net = pcall(function()
+        local packages = ReplicatedStorage:FindFirstChild("Packages")
+        if not packages then return nil end
+        local idx = packages:FindFirstChild("_Index")
+        if not idx then return nil end
+        local sleit = idx:FindFirstChild("sleitnick_net@0.2.0")
+        if not sleit then return nil end
+        return sleit:FindFirstChild("net")
+    end)
+    return ok and net or nil
+end
+
+local net = Utils.FindNet()
+function Utils.ResolveRemote(name)
+    if not net then return nil end
+    local ok, rem = pcall(function() return net:FindFirstChild(name) end)
+    return ok and rem or nil
+end
+
+-- Remote References
+local rodRemote = Utils.ResolveRemote("RF/ChargeFishingRod")
+local miniGameRemote = Utils.ResolveRemote("RF/RequestFishingMinigameStarted")
+local finishRemote = Utils.ResolveRemote("RE/FishingCompleted")
+local equipRemote = Utils.ResolveRemote("RE/EquipToolFromHotbar")
+
+-- ============================================================================
+-- FISHING AI MODULE
+-- ============================================================================
+local FishingAI = {
+    enabled = false,
+    mode = "secure",
+    sessionId = 1,
+    statistics = {
+        fishCaught = 0,
+        startTime = tick(),
+        sessionValue = 0
+    }
+}
+
+function FishingAI.GetRealisticTiming(phase)
+    local timings = {
+        charging = math.random(150, 300) / 1000,
+        casting = math.random(100, 250) / 1000,
+        waiting = math.random(800, 1500) / 1000,
+        reeling = math.random(200, 400) / 1000
+    }
+    return timings[phase] or 0.5
+end
+
+function FishingAI.DoSecureCycle()
+    -- Equip rod first
+    if equipRemote then 
+        pcall(function() equipRemote:FireServer(1) end)
+    end
+    
+    -- Safe mode logic
+    local usePerfect = math.random(1,100) <= Config.safeModeChance
+    
+    -- Charge rod
+    local timestamp = usePerfect and 9999999999 or (tick() + math.random())
+    if rodRemote then
+        pcall(function() rodRemote:InvokeServer(timestamp) end)
+    end
+    
+    task.wait(0.1)
+    
+    -- Minigame
+    local x = usePerfect and -1.238 or (math.random(-1000,1000)/1000)
+    local y = usePerfect and 0.969 or (math.random(0,1000)/1000)
+    
+    if miniGameRemote then
+        pcall(function() miniGameRemote:InvokeServer(x, y) end)
+    end
+    
+    task.wait(1.3)
+    
+    -- Complete fishing
+    if finishRemote then 
+        pcall(function() finishRemote:FireServer() end)
+    end
+    
+    -- Update statistics
+    FishingAI.statistics.fishCaught = FishingAI.statistics.fishCaught + 1
+end
+
+function FishingAI.StartSecureMode()
+    if FishingAI.enabled then return end
+    
+    FishingAI.enabled = true
+    FishingAI.sessionId = FishingAI.sessionId + 1
+    local currentSessionId = FishingAI.sessionId
+    
+    Utils.Notify("🔒 Secure Mode", "Safe & reliable fishing started!")
+    
+    task.spawn(function()
+        while FishingAI.enabled and FishingAI.sessionId == currentSessionId do
+            FishingAI.DoSecureCycle()
+            task.wait(Config.autoRecastDelay + math.random() * 0.5)
+        end
+    end)
+end
+
+function FishingAI.StopFishing()
+    FishingAI.enabled = false
+    sessionId = sessionId + 1
+    Utils.Notify("🛑 Fishing Stopped", "Secure mode stopped")
+end
+
+-- Auto Mode
+function FishingAI.StartAutoMode()
+    if Config.autoModeEnabled then return end
+    
+    Config.autoModeEnabled = true
+    autoModeSessionId = autoModeSessionId + 1
+    local currentSessionId = autoModeSessionId
+    
+    Utils.Notify("🔥 Auto Mode", "Continuous fishing started!")
+    
+    task.spawn(function()
+        while Config.autoModeEnabled and autoModeSessionId == currentSessionId do
+            if equipRemote then pcall(function() equipRemote:FireServer(1) end) end
+            task.wait(0.05)
+            
+            if rodRemote then pcall(function() rodRemote:InvokeServer(workspace:GetServerTimeNow()) end) end
+            task.wait(0.1)
+            
+            if miniGameRemote then pcall(function() miniGameRemote:InvokeServer(-1.2379989624023438, 0.9800224985802423) end) end
+            task.wait(0.5)
+            
+            if finishRemote then pcall(function() finishRemote:FireServer() end) end
+            
+            FishingAI.statistics.fishCaught = FishingAI.statistics.fishCaught + 1
+            task.wait(0.1)
+        end
+    end)
+end
+
+function FishingAI.StopAutoMode()
+    Config.autoModeEnabled = false
+    autoModeSessionId = autoModeSessionId + 1
+    Utils.Notify("🛑 Auto Mode", "Continuous fishing stopped")
+end
+
+-- ============================================================================
+-- TELEPORT MODULE
+-- ============================================================================
+local Teleport = {}
+
+function Teleport.To(position)
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(position)
+        Utils.Notify("🚀 Teleport", "Teleported successfully")
+    else
+        Utils.Notify("❌ Teleport", "Character not found")
+    end
+end
+
+-- ============================================================================
+-- MOVEMENT MODULE
+-- ============================================================================
+local Movement = {
+    floatEnabled = false,
+    speed = 16,
+    jumpPower = 50
+}
+
+function Movement.SetSpeed(value)
+    Movement.speed = value
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = value
+    end
+end
+
+function Movement.SetJump(value)
+    Movement.jumpPower = value
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.JumpPower = value
+    end
+end
+
+-- ============================================================================
+-- MAIN UI BUILDER (ORIGINAL DESIGN PRESERVED)
+-- ============================================================================
+local function BuildUI()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+    
+    -- Check for existing UI
+    local existing = playerGui:FindFirstChild("ModernAutoFishUI")
+    if existing then existing:Destroy() end
+    
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "ModernAutoFishUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = playerGui
+
+    local panel = Instance.new("Frame")
+    panel.Name = "Panel"
+    panel.Size = UDim2.new(0, 480, 0, 380)
+    panel.Position = UDim2.new(0, 18, 0, 70)
+    panel.BackgroundColor3 = Config.Colors.MainBG
+    panel.BorderSizePixel = 0
+    panel.Parent = screenGui
+    Instance.new("UICorner", panel)
+    local stroke = Instance.new("UIStroke", panel)
+    stroke.Thickness = 1
+    stroke.Color = Config.Colors.Border
+
+    -- Header (drag)
+    local header = Instance.new("Frame", panel)
+    header.Size = UDim2.new(1, 0, 0, 40)
+    header.BackgroundTransparency = 1
+    header.Active = true
+    header.Selectable = true
+
+    local title = Instance.new("TextLabel", header)
+    title.Size = UDim2.new(1, -100, 1, 0)
+    title.Position = UDim2.new(0, 10, 0, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "🐳ModernAutoFish v2.1"
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.TextColor3 = Config.Colors.Primary
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Button container
+    local btnContainer = Instance.new("Frame", header)
+    btnContainer.Size = UDim2.new(0, 120, 1, 0)
+    btnContainer.Position = UDim2.new(1, -125, 0, 0)
+    btnContainer.BackgroundTransparency = 1
+
+    -- Minimize button
+    local minimizeBtn = Instance.new("TextButton", btnContainer)
+    minimizeBtn.Size = UDim2.new(0, 32, 0, 26)
+    minimizeBtn.Position = UDim2.new(0, 4, 0.5, -13)
+    minimizeBtn.Text = "−"
+    minimizeBtn.Font = Enum.Font.GothamBold
+    minimizeBtn.TextSize = 16
+    minimizeBtn.BackgroundColor3 = Color3.fromRGB(60,60,66)
+    minimizeBtn.TextColor3 = Color3.fromRGB(230,230,230)
+    Instance.new("UICorner", minimizeBtn)
+
+    -- Floating button (hidden initially)
+    local floatBtn = Instance.new("TextButton", screenGui)
+    floatBtn.Name = "FloatToggle"
+    floatBtn.Size = UDim2.new(0,50,0,50)
+    floatBtn.Position = UDim2.new(0,15,0,15)
+    floatBtn.Text = "🎣"
+    floatBtn.BackgroundColor3 = Config.Colors.SectionBG
+    floatBtn.Font = Enum.Font.GothamBold
+    floatBtn.TextSize = 20
+    floatBtn.TextColor3 = Config.Colors.Accent
+    floatBtn.Visible = false
+    Instance.new("UICorner", floatBtn)
+
+    minimizeBtn.MouseButton1Click:Connect(function()
+        panel.Visible = false
+        floatBtn.Visible = true
+        Utils.Notify("🎣 Minimized", "Click floating button to restore")
+    end)
+
+    floatBtn.MouseButton1Click:Connect(function()
+        panel.Visible = true
+        floatBtn.Visible = false
+        Utils.Notify("🎣 Restored", "UI restored from floating mode")
+    end)
+
+    -- Reload button
+    local reloadBtn = Instance.new("TextButton", btnContainer)
+    reloadBtn.Size = UDim2.new(0, 32, 0, 26)
+    reloadBtn.Position = UDim2.new(0, 42, 0.5, -13)
+    reloadBtn.Text = "🔄"
+    reloadBtn.Font = Enum.Font.GothamBold
+    reloadBtn.TextSize = 14
+    reloadBtn.BackgroundColor3 = Config.Colors.Blue
+    reloadBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", reloadBtn)
+
+    reloadBtn.MouseButton1Click:Connect(function()
+        Utils.Notify("🔄 Reloading...", "Restarting script in 2 seconds...")
+        task.wait(2)
+        
+        -- Clean shutdown
+        Config.enabled = false
+        FishingAI.enabled = false
+        Config.autoModeEnabled = false
+        sessionId = sessionId + 1
+        autoModeSessionId = autoModeSessionId + 1
+        
+        if screenGui and screenGui.Parent then
+            screenGui:Destroy()
+        end
+        
+        task.wait(0.5)
+        Utils.Notify("🔄 Rejoining...", "Joining server now...")
+        
+        local TeleportService = game:GetService("TeleportService")
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+    end)
+
+    -- Close button
+    local closeBtn = Instance.new("TextButton", btnContainer)
+    closeBtn.Size = UDim2.new(0, 32, 0, 26)
+    closeBtn.AnchorPoint = Vector2.new(1, 0)
+    closeBtn.Position = UDim2.new(1, -4, 0.5, -13)
+    closeBtn.Text = "X"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 16
+    closeBtn.BackgroundColor3 = Color3.fromRGB(160,60,60)
+    closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", closeBtn)
+
+    closeBtn.MouseButton1Click:Connect(function()
+        -- Clean shutdown
+        Config.enabled = false
+        FishingAI.enabled = false
+        Config.autoModeEnabled = false
+        sessionId = sessionId + 1
+        autoModeSessionId = autoModeSessionId + 1
+        
+        screenGui:Destroy()
+        Utils.Notify("🎣 Closed", "Modern AutoFish closed")
+    end)
+
+    -- Drag functionality
+    local dragging = false
+    local dragStart = Vector2.new(0,0)
+    local startPos = Vector2.new(0,0)
+    local dragInput
+
+    local function updateDrag(input)
+        if not dragging then return end
+        local delta = input.Position - dragStart
+        local desiredX = startPos.X + delta.X
+        local desiredY = startPos.Y + delta.Y
+        local cam = workspace.CurrentCamera
+        local vw, vh = 800, 600
+        if cam and cam.ViewportSize then
+            vw, vh = cam.ViewportSize.X, cam.ViewportSize.Y
+        end
+        local panelSize = panel.AbsoluteSize
+        local maxX = math.max(0, vw - (panelSize.X or 0))
+        local maxY = math.max(0, vh - (panelSize.Y or 0))
+        local clampedX = math.clamp(desiredX, 0, maxX)
+        local clampedY = math.clamp(desiredY, 0, maxY)
+        panel.Position = UDim2.new(0, clampedX, 0, clampedY)
+    end
+
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = panel.AbsolutePosition
+            dragInput = input
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    header.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            updateDrag(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            updateDrag(input)
+        end
+    end)
+
+    -- Left sidebar for tabs
+    local sidebar = Instance.new("Frame", panel)
+    sidebar.Size = UDim2.new(0, 120, 1, -50)
+    sidebar.Position = UDim2.new(0, 10, 0, 45)
+    sidebar.BackgroundColor3 = Config.Colors.SidebarBG
+    sidebar.BorderSizePixel = 0
+    Instance.new("UICorner", sidebar)
+
+    -- Tab buttons
+    local function createTabButton(text, position, yPos)
+        local btn = Instance.new("TextButton", sidebar)
+        btn.Size = UDim2.new(1, -10, 0, 40)
+        btn.Position = UDim2.new(0, 5, 0, yPos)
+        btn.Text = text
+        btn.Font = Enum.Font.GothamSemibold
+        btn.TextSize = 14
+        btn.BackgroundColor3 = Config.Colors.InactiveTab
+        btn.TextColor3 = Config.Colors.Secondary
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        
+        local corner = Instance.new("UICorner", btn)
+        corner.CornerRadius = UDim.new(0, 6)
+        
+        local padding = Instance.new("UIPadding", btn)
+        padding.PaddingLeft = UDim.new(0, 10)
+        
+        return btn
+    end
+
+    local fishingAITabBtn = createTabButton("🤖 Fishing AI", 1, 10)
+    local teleportTabBtn = createTabButton("🌍 Teleport", 2, 60)
+    local playerTabBtn = createTabButton("👥 Player", 3, 110)
+    local featureTabBtn = createTabButton("⚡ Features", 4, 160)
+    local dashboardTabBtn = createTabButton("📊 Dashboard", 5, 210)
+
+    -- Set initial active tab
+    fishingAITabBtn.BackgroundColor3 = Config.Colors.ActiveTab
+    fishingAITabBtn.TextColor3 = Config.Colors.Primary
+
+    -- Content area
+    local contentContainer = Instance.new("Frame", panel)
+    contentContainer.Size = UDim2.new(1, -145, 1, -50)
+    contentContainer.Position = UDim2.new(0, 140, 0, 45)
+    contentContainer.BackgroundTransparency = 1
+
+    -- Content title
+    local contentTitle = Instance.new("TextLabel", contentContainer)
+    contentTitle.Size = UDim2.new(1, 0, 0, 24)
+    contentTitle.Text = "Smart AI Fishing Configuration"
+    contentTitle.Font = Enum.Font.GothamBold
+    contentTitle.TextSize = 16
+    contentTitle.TextColor3 = Config.Colors.Primary
+    contentTitle.BackgroundTransparency = 1
+    contentTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Create tab frames
+    local function createTabFrame()
+        local frame = Instance.new("Frame", contentContainer)
+        frame.Size = UDim2.new(1, 0, 1, -30)
+        frame.Position = UDim2.new(0, 0, 0, 30)
+        frame.BackgroundColor3 = Config.Colors.SecondaryBG
+        frame.BorderSizePixel = 0
+        frame.Visible = false
+        Instance.new("UICorner", frame)
+        
+        local scroll = Instance.new("ScrollingFrame", frame)
+        scroll.Size = UDim2.new(1, -10, 1, -10)
+        scroll.Position = UDim2.new(0, 5, 0, 5)
+        scroll.BackgroundTransparency = 1
+        scroll.BorderSizePixel = 0
+        scroll.ScrollBarThickness = 6
+        scroll.ScrollBarImageColor3 = Color3.fromRGB(80,80,80)
+        
+        return frame, scroll
+    end
+
+    -- Tab 1: Fishing AI
+    local fishingAIFrame, fishingAIScroll = createTabFrame()
+    fishingAIFrame.Visible = true
+
+    -- Secure Mode Section
+    local secureModeSection = Instance.new("Frame", fishingAIScroll)
+    secureModeSection.Size = UDim2.new(1, -10, 0, 120)
+    secureModeSection.Position = UDim2.new(0, 5, 0, 5)
+    secureModeSection.BackgroundColor3 = Config.Colors.SectionBG
+    secureModeSection.BorderSizePixel = 0
+    Instance.new("UICorner", secureModeSection)
+
+    local secureModeLabel = Instance.new("TextLabel", secureModeSection)
+    secureModeLabel.Size = UDim2.new(1, -20, 0, 25)
+    secureModeLabel.Position = UDim2.new(0, 10, 0, 5)
+    secureModeLabel.Text = "🔒 Secure Fishing Mode"
+    secureModeLabel.Font = Enum.Font.GothamBold
+    secureModeLabel.TextSize = 14
+    secureModeLabel.TextColor3 = Config.Colors.Success
+    secureModeLabel.BackgroundTransparency = 1
+    secureModeLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local secureButton = Instance.new("TextButton", secureModeSection)
+    secureButton.Size = UDim2.new(0.48, -5, 0, 35)
+    secureButton.Position = UDim2.new(0, 10, 0, 35)
+    secureButton.Text = "🔒 Start Secure"
+    secureButton.Font = Enum.Font.GothamBold
+    secureButton.TextSize = 12
+    secureButton.BackgroundColor3 = Config.Colors.Success
+    secureButton.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", secureButton)
+
+    local secureStopButton = Instance.new("TextButton", secureModeSection)
+    secureStopButton.Size = UDim2.new(0.48, -5, 0, 35)
+    secureStopButton.Position = UDim2.new(0.52, 5, 0, 35)
+    secureStopButton.Text = "🛑 Stop Secure"
+    secureStopButton.Font = Enum.Font.GothamBold
+    secureStopButton.TextSize = 12
+    secureStopButton.BackgroundColor3 = Config.Colors.Error
+    secureStopButton.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", secureStopButton)
+
+    local modeStatus = Instance.new("TextLabel", secureModeSection)
+    modeStatus.Size = UDim2.new(1, -20, 0, 35)
+    modeStatus.Position = UDim2.new(0, 10, 0, 80)
+    modeStatus.Text = "🔒 Secure Mode Ready - Safe & Reliable Fishing"
+    modeStatus.Font = Enum.Font.GothamSemibold
+    modeStatus.TextSize = 11
+    modeStatus.TextColor3 = Config.Colors.Success
+    modeStatus.BackgroundTransparency = 1
+    modeStatus.TextXAlignment = Enum.TextXAlignment.Left
+    modeStatus.TextWrapped = true
+
+    -- Auto Mode Section
+    local autoModeSection = Instance.new("Frame", fishingAIScroll)
+    autoModeSection.Size = UDim2.new(1, -10, 0, 120)
+    autoModeSection.Position = UDim2.new(0, 5, 0, 135)
+    autoModeSection.BackgroundColor3 = Config.Colors.SectionBG
+    autoModeSection.BorderSizePixel = 0
+    Instance.new("UICorner", autoModeSection)
+
+    local autoModeLabel = Instance.new("TextLabel", autoModeSection)
+    autoModeLabel.Size = UDim2.new(1, -20, 0, 25)
+    autoModeLabel.Position = UDim2.new(0, 10, 0, 5)
+    autoModeLabel.Text = "🔥 Auto Mode (Fast)"
+    autoModeLabel.Font = Enum.Font.GothamBold
+    autoModeLabel.TextSize = 14
+    autoModeLabel.TextColor3 = Config.Colors.Warning
+    autoModeLabel.BackgroundTransparency = 1
+    autoModeLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local autoModeStartButton = Instance.new("TextButton", autoModeSection)
+    autoModeStartButton.Size = UDim2.new(0.48, -5, 0, 35)
+    autoModeStartButton.Position = UDim2.new(0, 10, 0, 35)
+    autoModeStartButton.Text = "🔥 Start Auto"
+    autoModeStartButton.Font = Enum.Font.GothamBold
+    autoModeStartButton.TextSize = 12
+    autoModeStartButton.BackgroundColor3 = Config.Colors.Warning
+    autoModeStartButton.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", autoModeStartButton)
+
+    local autoModeStopButton = Instance.new("TextButton", autoModeSection)
+    autoModeStopButton.Size = UDim2.new(0.48, -5, 0, 35)
+    autoModeStopButton.Position = UDim2.new(0.52, 5, 0, 35)
+    autoModeStopButton.Text = "🛑 Stop Auto"
+    autoModeStopButton.Font = Enum.Font.GothamBold
+    autoModeStopButton.TextSize = 12
+    autoModeStopButton.BackgroundColor3 = Config.Colors.Error
+    autoModeStopButton.TextColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", autoModeStopButton)
+
+    local autoModeStatus = Instance.new("TextLabel", autoModeSection)
+    autoModeStatus.Size = UDim2.new(1, -20, 0, 35)
+    autoModeStatus.Position = UDim2.new(0, 10, 0, 80)
+    autoModeStatus.Text = "🔥 Auto Mode Ready - Fast Continuous Fishing"
+    autoModeStatus.Font = Enum.Font.GothamSemibold
+    autoModeStatus.TextSize = 11
+    autoModeStatus.TextColor3 = Config.Colors.Warning
+    autoModeStatus.BackgroundTransparency = 1
+    autoModeStatus.TextXAlignment = Enum.TextXAlignment.Left
+    autoModeStatus.TextWrapped = true
+
+    fishingAIScroll.CanvasSize = UDim2.new(0, 0, 0, 270)
+
+    -- Tab 2: Teleport
+    local teleportFrame, teleportScroll = createTabFrame()
+
+    local yOffset = 5
+    for locationName, locationCFrame in pairs(Config.IslandLocations) do
+        local btn = Instance.new("TextButton", teleportScroll)
+        btn.Size = UDim2.new(1, -10, 0, 35)
+        btn.Position = UDim2.new(0, 5, 0, yOffset)
+        btn.Text = locationName
+        btn.Font = Enum.Font.GothamSemibold
+        btn.TextSize = 12
+        btn.BackgroundColor3 = Config.Colors.Accent
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        Instance.new("UICorner", btn)
+        
+        local padding = Instance.new("UIPadding", btn)
+        padding.PaddingLeft = UDim.new(0, 10)
+        
+        btn.MouseButton1Click:Connect(function()
+            Teleport.To(locationCFrame.Position)
+        end)
+        
+        yOffset = yOffset + 40
+    end
+
+    teleportScroll.CanvasSize = UDim2.new(0, 0, 0, yOffset)
+
+    -- Tab 3: Player
+    local playerFrame, playerScroll = createTabFrame()
+
+    local function updatePlayerList()
+        for _, child in pairs(playerScroll:GetChildren()) do
+            if child:IsA("TextButton") then
+                child:Destroy()
+            end
+        end
+        
+        local yPos = 5
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local btn = Instance.new("TextButton", playerScroll)
+                btn.Size = UDim2.new(1, -10, 0, 35)
+                btn.Position = UDim2.new(0, 5, 0, yPos)
+                btn.Text = "🎮 " .. player.DisplayName
+                btn.Font = Enum.Font.GothamSemibold
+                btn.TextSize = 12
+                btn.BackgroundColor3 = Config.Colors.Accent
+                btn.TextColor3 = Color3.fromRGB(255,255,255)
+                btn.TextXAlignment = Enum.TextXAlignment.Left
+                Instance.new("UICorner", btn)
+                
+                local padding = Instance.new("UIPadding", btn)
+                padding.PaddingLeft = UDim.new(0, 10)
+                
+                btn.MouseButton1Click:Connect(function()
+                    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        Teleport.To(player.Character.HumanoidRootPart.Position)
+                    end
+                end)
+                
+                yPos = yPos + 40
+            end
+        end
+        
+        playerScroll.CanvasSize = UDim2.new(0, 0, 0, yPos)
+    end
+
+    updatePlayerList()
+
+    -- Tab 4: Features
+    local featureFrame, featureScroll = createTabFrame()
+
+    -- Speed Section
+    local speedSection = Instance.new("Frame", featureScroll)
+    speedSection.Size = UDim2.new(1, -10, 0, 80)
+    speedSection.Position = UDim2.new(0, 5, 0, 5)
+    speedSection.BackgroundColor3 = Config.Colors.SectionBG
+    speedSection.BorderSizePixel = 0
+    Instance.new("UICorner", speedSection)
+
+    local speedLabel = Instance.new("TextLabel", speedSection)
+    speedLabel.Size = UDim2.new(1, -20, 0, 20)
+    speedLabel.Position = UDim2.new(0, 10, 0, 8)
+    speedLabel.Text = "🏃 Walk Speed: 16"
+    speedLabel.Font = Enum.Font.GothamSemibold
+    speedLabel.TextSize = 14
+    speedLabel.TextColor3 = Config.Colors.Primary
+    speedLabel.BackgroundTransparency = 1
+    speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local speedSlider = Instance.new("Frame", speedSection)
+    speedSlider.Size = UDim2.new(1, -20, 0, 20)
+    speedSlider.Position = UDim2.new(0, 10, 0, 35)
+    speedSlider.BackgroundColor3 = Color3.fromRGB(50,50,60)
+    speedSlider.BorderSizePixel = 0
+    Instance.new("UICorner", speedSlider)
+
+    local speedFill = Instance.new("Frame", speedSlider)
+    speedFill.Size = UDim2.new(0.16, 0, 1, 0)
+    speedFill.Position = UDim2.new(0, 0, 0, 0)
+    speedFill.BackgroundColor3 = Config.Colors.Accent
+    speedFill.BorderSizePixel = 0
+    Instance.new("UICorner", speedFill)
+
+    -- Jump Section
+    local jumpSection = Instance.new("Frame", featureScroll)
+    jumpSection.Size = UDim2.new(1, -10, 0, 80)
+    jumpSection.Position = UDim2.new(0, 5, 0, 95)
+    jumpSection.BackgroundColor3 = Config.Colors.SectionBG
+    jumpSection.BorderSizePixel = 0
+    Instance.new("UICorner", jumpSection)
+
+    local jumpLabel = Instance.new("TextLabel", jumpSection)
+    jumpLabel.Size = UDim2.new(1, -20, 0, 20)
+    jumpLabel.Position = UDim2.new(0, 10, 0, 8)
+    jumpLabel.Text = "🦘 Jump Power: 50"
+    jumpLabel.Font = Enum.Font.GothamSemibold
+    jumpLabel.TextSize = 14
+    jumpLabel.TextColor3 = Config.Colors.Primary
+    jumpLabel.BackgroundTransparency = 1
+    jumpLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    featureScroll.CanvasSize = UDim2.new(0, 0, 0, 185)
+
+    -- Tab 5: Dashboard
+    local dashboardFrame, dashboardScroll = createTabFrame()
+
+    -- Session Stats
+    local sessionSection = Instance.new("Frame", dashboardScroll)
+    sessionSection.Size = UDim2.new(1, -10, 0, 120)
+    sessionSection.Position = UDim2.new(0, 5, 0, 5)
+    sessionSection.BackgroundColor3 = Config.Colors.SectionBG
+    sessionSection.BorderSizePixel = 0
+    Instance.new("UICorner", sessionSection)
+
+    local sessionTitle = Instance.new("TextLabel", sessionSection)
+    sessionTitle.Size = UDim2.new(1, -20, 0, 25)
+    sessionTitle.Position = UDim2.new(0, 10, 0, 5)
+    sessionTitle.Text = "📊 Session Statistics"
+    sessionTitle.Font = Enum.Font.GothamBold
+    sessionTitle.TextSize = 14
+    sessionTitle.TextColor3 = Config.Colors.Accent
+    sessionTitle.BackgroundTransparency = 1
+    sessionTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+    local fishCountLabel = Instance.new("TextLabel", sessionSection)
+    fishCountLabel.Size = UDim2.new(1, -20, 0, 20)
+    fishCountLabel.Position = UDim2.new(0, 10, 0, 35)
+    fishCountLabel.Text = "🎣 Fish Caught: 0"
+    fishCountLabel.Font = Enum.Font.GothamSemibold
+    fishCountLabel.TextSize = 12
+    fishCountLabel.TextColor3 = Config.Colors.Primary
+    fishCountLabel.BackgroundTransparency = 1
+    fishCountLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local timeLabel = Instance.new("TextLabel", sessionSection)
+    timeLabel.Size = UDim2.new(1, -20, 0, 20)
+    timeLabel.Position = UDim2.new(0, 10, 0, 60)
+    timeLabel.Text = "⏱️ Session Time: 00:00:00"
+    timeLabel.Font = Enum.Font.GothamSemibold
+    timeLabel.TextSize = 12
+    timeLabel.TextColor3 = Config.Colors.Primary
+    timeLabel.BackgroundTransparency = 1
+    timeLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local valueLabel = Instance.new("TextLabel", sessionSection)
+    valueLabel.Size = UDim2.new(1, -20, 0, 20)
+    valueLabel.Position = UDim2.new(0, 10, 0, 85)
+    valueLabel.Text = "💰 Session Value: 0¢"
+    valueLabel.Font = Enum.Font.GothamSemibold
+    valueLabel.TextSize = 12
+    valueLabel.TextColor3 = Config.Colors.Primary
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    dashboardScroll.CanvasSize = UDim2.new(0, 0, 0, 135)
+
+    -- Tab switching logic
+    local tabs = {
+        [fishingAITabBtn] = {frame = fishingAIFrame, title = "Smart AI Fishing Configuration"},
+        [teleportTabBtn] = {frame = teleportFrame, title = "Island Locations"},
+        [playerTabBtn] = {frame = playerFrame, title = "Player Teleport"},
+        [featureTabBtn] = {frame = featureFrame, title = "Character Features"},
+        [dashboardTabBtn] = {frame = dashboardFrame, title = "Fishing Analytics"}
+    }
+
+    local function switchTab(activeBtn)
+        for btn, data in pairs(tabs) do
+            if btn == activeBtn then
+                btn.BackgroundColor3 = Config.Colors.ActiveTab
+                btn.TextColor3 = Config.Colors.Primary
+                data.frame.Visible = true
+                contentTitle.Text = data.title
+            else
+                btn.BackgroundColor3 = Config.Colors.InactiveTab
+                btn.TextColor3 = Config.Colors.Secondary
+                data.frame.Visible = false
+            end
+        end
+        
+        if activeBtn == playerTabBtn then
+            updatePlayerList()
+        end
+    end
+
+    for btn, data in pairs(tabs) do
+        btn.MouseButton1Click:Connect(function()
+            switchTab(btn)
+        end)
+    end
+
+    -- Button callbacks
+    secureButton.MouseButton1Click:Connect(function()
+        FishingAI.StartSecureMode()
+        modeStatus.Text = "🔒 Current: Secure Mode Active"
+        modeStatus.TextColor3 = Config.Colors.Success
+    end)
+
+    secureStopButton.MouseButton1Click:Connect(function()
+        FishingAI.StopFishing()
+        modeStatus.Text = "🔒 Secure Mode Ready - Safe & Reliable Fishing"
+        modeStatus.TextColor3 = Config.Colors.Success
+    end)
+
+    autoModeStartButton.MouseButton1Click:Connect(function()
+        FishingAI.StartAutoMode()
+        autoModeStatus.Text = "🔥 Auto Mode Running..."
+        autoModeStatus.TextColor3 = Config.Colors.Success
+    end)
+
+    autoModeStopButton.MouseButton1Click:Connect(function()
+        FishingAI.StopAutoMode()
+        autoModeStatus.Text = "🔥 Auto Mode Ready - Fast Continuous Fishing"
+        autoModeStatus.TextColor3 = Config.Colors.Warning
+    end)
+
+    -- Update dashboard periodically
+    task.spawn(function()
+        while screenGui.Parent do
+            local sessionTime = tick() - FishingAI.statistics.startTime
+            local hours = math.floor(sessionTime / 3600)
+            local minutes = math.floor((sessionTime % 3600) / 60)
+            local seconds = math.floor(sessionTime % 60)
+            
+            fishCountLabel.Text = "🎣 Fish Caught: " .. FishingAI.statistics.fishCaught
+            timeLabel.Text = string.format("⏱️ Session Time: %02d:%02d:%02d", hours, minutes, seconds)
+            valueLabel.Text = "💰 Session Value: " .. FishingAI.statistics.sessionValue .. "¢"
+            
+            task.wait(1)
+        end
+    end)
+
+    Utils.Notify("🎣 ModernAutoFish", "UI loaded with preserved original design!")
+end
+
+-- ============================================================================
+-- INITIALIZATION
+-- ============================================================================
+
+-- Build UI
+BuildUI()
+
+-- Global API
+_G.ModernAutoFish = {
+    -- Core functions
+    StartSecure = FishingAI.StartSecureMode,
+    StartAuto = FishingAI.StartAutoMode,
+    Stop = FishingAI.StopFishing,
+    StopAuto = FishingAI.StopAutoMode,
+    
+    -- Teleport
+    TeleportTo = Teleport.To,
+    
+    -- Movement
+    SetSpeed = Movement.SetSpeed,
+    SetJump = Movement.SetJump,
+    
+    -- Statistics
+    GetStats = function() return FishingAI.statistics end,
+    
+    -- Module access
+    Config = Config,
+    Utils = Utils,
+    FishingAI = FishingAI,
+    Movement = Movement,
+    Teleport = Teleport
+}
+
+print("🎣 ModernAutoFish v2.1.0 (UI Preserved) - Loaded successfully!")
+print("📚 Repository: https://github.com/donitono/Ikan-itu")
+print("🎨 Original UI design preserved with modern dark theme")
+print("🔧 API available at: _G.ModernAutoFish")
